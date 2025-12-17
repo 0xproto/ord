@@ -2,7 +2,8 @@ use {
   self::{
     entry::{
       Entry, HeaderValue, InscriptionEntry, InscriptionEntryValue, InscriptionIdValue,
-      OutPointValue, RuneEntryValue, RuneIdValue, SatPointValue, SatRange, TxidValue,
+      OutPointValue, RuneActivityEntryValue, RuneEntryValue, RuneIdValue, SatPointValue, SatRange,
+      TransferEntryValue, TxidValue,
     },
     event::Event,
     lot::Lot,
@@ -77,6 +78,13 @@ define_table! { TRANSACTION_ID_TO_RUNE, &TxidValue, u128 }
 define_table! { TRANSACTION_ID_TO_TRANSACTION, &TxidValue, &[u8] }
 define_table! { WRITE_TRANSACTION_STARTING_BLOCK_COUNT_TO_TIMESTAMP, u32, u128 }
 
+pub(crate) type RuneActivityKey = (RuneIdValue, u32, u32);
+pub(crate) type RuneHoldersValue = (OutPointValue, u128);
+
+define_multimap_table! { INSCRIPTION_ID_TO_TRANSFERS, InscriptionIdValue, TransferEntryValue }
+define_table! { RUNE_ACTIVITY, RuneActivityKey, RuneActivityEntryValue }
+define_multimap_table! { RUNE_ID_TO_OUTPOINT, RuneIdValue, RuneHoldersValue }
+
 #[derive(Copy, Clone)]
 pub(crate) enum Statistic {
   Schema = 0,
@@ -96,6 +104,7 @@ pub(crate) enum Statistic {
   SatRanges = 14,
   UnboundInscriptions = 16,
   LastSavepointHeight = 17,
+  IndexHistory = 18,
 }
 
 impl Statistic {
@@ -208,6 +217,7 @@ pub struct Index {
   index_runes: bool,
   index_sats: bool,
   index_transactions: bool,
+  index_history: bool,
   path: PathBuf,
   settings: Settings,
   started: DateTime<Utc>,
@@ -368,7 +378,19 @@ impl Index {
             u64::from(settings.index_transactions_raw()),
           )?;
 
+          Self::set_statistic(
+            &mut statistics,
+            Statistic::IndexHistory,
+            u64::from(settings.index_history_raw()),
+          )?;
+
           Self::set_statistic(&mut statistics, Statistic::Schema, SCHEMA_VERSION)?;
+
+          if settings.index_history_raw() {
+            tx.open_table(RUNE_ACTIVITY)?;
+            tx.open_multimap_table(RUNE_ID_TO_OUTPOINT)?;
+            tx.open_multimap_table(INSCRIPTION_ID_TO_TRANSFERS)?;
+          }
         }
 
         if settings.index_runes_raw() && settings.chain() == Chain::Mainnet {
@@ -427,6 +449,7 @@ impl Index {
     let index_sats;
     let index_transactions;
     let index_inscriptions;
+    let index_history;
 
     {
       let tx = database.begin_read()?;
@@ -436,6 +459,7 @@ impl Index {
       index_runes = Self::is_statistic_set(&statistics, Statistic::IndexRunes)?;
       index_sats = Self::is_statistic_set(&statistics, Statistic::IndexSats)?;
       index_transactions = Self::is_statistic_set(&statistics, Statistic::IndexTransactions)?;
+      index_history = Self::is_statistic_set(&statistics, Statistic::IndexHistory)?;
     }
 
     let genesis_block_coinbase_transaction =
@@ -465,6 +489,7 @@ impl Index {
       index_sats,
       index_transactions,
       index_inscriptions,
+      index_history,
       settings: settings.clone(),
       path,
       started: Utc::now(),
@@ -6926,3 +6951,5 @@ mod tests {
     assert_eq!(Statistic::Schema.key(), 0);
   }
 }
+#[cfg(test)]
+mod history_tests;

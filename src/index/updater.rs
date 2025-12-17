@@ -358,12 +358,25 @@ impl Updater<'_> {
       let mut sequence_number_to_rune_id = wtx.open_table(SEQUENCE_NUMBER_TO_RUNE_ID)?;
       let mut transaction_id_to_rune = wtx.open_table(TRANSACTION_ID_TO_RUNE)?;
 
+      let mut rune_activity = if self.index.settings.index_history_raw() {
+        Some(wtx.open_table(RUNE_ACTIVITY)?)
+      } else {
+        None
+      };
+
+      let mut rune_id_to_outpoint = if self.index.settings.index_history_raw() {
+        Some(wtx.open_multimap_table(RUNE_ID_TO_OUTPOINT)?)
+      } else {
+        None
+      };
+
       let runes = statistic_to_count
         .get(&Statistic::Runes.into())?
         .map(|x| x.value())
         .unwrap_or(0);
 
       let mut rune_updater = RuneUpdater {
+        chain: self.index.settings.chain(),
         event_sender: self.index.event_sender.as_ref(),
         block_time: block.header.time,
         burned: HashMap::new(),
@@ -376,6 +389,8 @@ impl Updater<'_> {
           Height(self.height),
         ),
         outpoint_to_balances: &mut outpoint_to_rune_balances,
+        rune_activity: rune_activity.as_mut(),
+        rune_id_to_outpoint: rune_id_to_outpoint.as_mut(),
         rune_to_id: &mut rune_to_rune_id,
         runes,
         sequence_number_to_rune_id: &mut sequence_number_to_rune_id,
@@ -503,6 +518,12 @@ impl Updater<'_> {
 
     let home_inscription_count = home_inscriptions.len()?;
 
+    let mut inscription_transfers = if self.index.index_history {
+      Some(wtx.open_multimap_table(INSCRIPTION_ID_TO_TRANSFERS)?)
+    } else {
+      None
+    };
+
     let mut inscription_updater = InscriptionUpdater {
       blessed_inscription_count,
       cursed_inscription_count,
@@ -512,6 +533,7 @@ impl Updater<'_> {
       home_inscriptions: &mut home_inscriptions,
       id_to_sequence_number: inscription_id_to_sequence_number,
       inscription_number_to_sequence_number: &mut inscription_number_to_sequence_number,
+      inscription_transfers: inscription_transfers.as_mut(),
       lost_sats,
       next_sequence_number,
       reward: Height(self.height).subsidy(),

@@ -488,6 +488,108 @@ impl Entry for Txid {
   }
 }
 
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
+pub struct RuneActivityEntry {
+  pub block_height: u32,
+  pub tx_index: u32,
+  pub operation: RuneOperation,
+  pub amount: u128,
+  pub address: Option<[u8; 32]>, // Simplified address representation (e.g. script pubkey hash or similar)
+  pub txid: Txid,
+  pub timestamp: u64,
+}
+
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
+pub enum RuneOperation {
+  Mint = 0,
+  Burn = 1,
+  Transfer = 2,
+  Etch = 3,
+}
+
+pub(super) type RuneActivityEntryValue = (
+  u32,              // block_height
+  u32,              // tx_index
+  u8,               // operation
+  u128,             // amount
+  Option<[u8; 32]>, // address
+  TxidValue,        // txid
+  u64,              // timestamp
+);
+
+impl Entry for RuneActivityEntry {
+  type Value = RuneActivityEntryValue;
+
+  fn load(
+    (block_height, tx_index, operation, amount, address, txid, timestamp): RuneActivityEntryValue,
+  ) -> Self {
+    Self {
+      block_height,
+      tx_index,
+      operation: match operation {
+        0 => RuneOperation::Mint,
+        1 => RuneOperation::Burn,
+        2 => RuneOperation::Transfer,
+        3 => RuneOperation::Etch,
+        _ => RuneOperation::Transfer, // Default/Fallback
+      },
+      amount,
+      address,
+      txid: Txid::load(txid),
+      timestamp,
+    }
+  }
+
+  fn store(self) -> Self::Value {
+    (
+      self.block_height,
+      self.tx_index,
+      self.operation as u8,
+      self.amount,
+      self.address,
+      self.txid.store(),
+      self.timestamp,
+    )
+  }
+}
+
+#[derive(Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
+pub struct TransferEntry {
+  pub block: u32,
+  pub txid: Txid,
+  pub old_satpoint: SatPoint,
+  pub new_satpoint: SatPoint,
+}
+
+pub(super) type TransferEntryValue = (
+  u32,           // block
+  TxidValue,     // txid
+  SatPointValue, // old_satpoint
+  SatPointValue, // new_satpoint
+);
+
+impl Entry for TransferEntry {
+  type Value = TransferEntryValue;
+
+  fn load((block, txid, old_satpoint, new_satpoint): TransferEntryValue) -> Self {
+    Self {
+      block,
+      txid: Txid::load(txid),
+      old_satpoint: SatPoint::load(old_satpoint),
+      new_satpoint: SatPoint::load(new_satpoint),
+    }
+  }
+
+  fn store(self) -> Self::Value {
+    (
+      self.block,
+      self.txid.store(),
+      self.old_satpoint.store(),
+      self.new_satpoint.store(),
+    )
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

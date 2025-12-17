@@ -1,8 +1,15 @@
-use super::*;
+use {
+  super::*,
+  crate::index::{
+    RuneActivityKey, RuneHoldersValue,
+    entry::{RuneActivityEntry, RuneOperation},
+  },
+};
 
 pub(super) struct RuneUpdater<'a, 'tx, 'client> {
   pub(super) block_time: u32,
   pub(super) burned: HashMap<RuneId, Lot>,
+  pub(super) chain: Chain,
   pub(super) client: &'client Client,
   pub(super) event_sender: Option<&'a mpsc::Sender<Event>>,
   pub(super) height: u32,
@@ -10,6 +17,8 @@ pub(super) struct RuneUpdater<'a, 'tx, 'client> {
   pub(super) inscription_id_to_sequence_number: &'a Table<'tx, InscriptionIdValue, u32>,
   pub(super) minimum: Rune,
   pub(super) outpoint_to_balances: &'a mut Table<'tx, &'static OutPointValue, &'static [u8]>,
+  pub(super) rune_activity: Option<&'a mut Table<'tx, RuneActivityKey, RuneActivityEntryValue>>,
+  pub(super) rune_id_to_outpoint: Option<&'a mut MultimapTable<'tx, RuneIdValue, RuneHoldersValue>>,
   pub(super) rune_to_id: &'a mut Table<'tx, u128, RuneIdValue>,
   pub(super) runes: u64,
   pub(super) sequence_number_to_rune_id: &'a mut Table<'tx, u32, RuneIdValue>,
@@ -39,6 +48,22 @@ impl RuneUpdater<'_, '_, '_> {
             amount: amount.n(),
           })?;
         }
+
+        if let Some(rune_activity) = &mut self.rune_activity {
+          rune_activity.insert(
+            (id.store(), self.height, tx_index),
+            RuneActivityEntry {
+              block_height: self.height,
+              tx_index,
+              operation: RuneOperation::Mint,
+              amount: amount.n(),
+              address: None,
+              txid,
+              timestamp: self.block_time.into(),
+            }
+            .store(),
+          )?;
+        }
       }
 
       let etched = self.etched(tx_index, tx, artifact)?;
@@ -52,8 +77,6 @@ impl RuneUpdater<'_, '_, '_> {
         for Edict { id, amount, output } in runestone.edicts.iter().copied() {
           let amount = Lot(amount);
 
-          // edicts with output values greater than the number of outputs
-          // should never be produced by the edict parser
           let output = usize::try_from(output).unwrap();
           assert!(output <= tx.output.len());
 
@@ -79,7 +102,6 @@ impl RuneUpdater<'_, '_, '_> {
           };
 
           if output == tx.output.len() {
-            // find non-OP_RETURN outputs
             let destinations = tx
               .output
               .iter()
@@ -91,7 +113,6 @@ impl RuneUpdater<'_, '_, '_> {
 
             if !destinations.is_empty() {
               if amount == 0 {
-                // if amount is zero, divide balance between eligible outputs
                 let amount = *balance / destinations.len() as u128;
                 let remainder = usize::try_from(*balance % destinations.len() as u128).unwrap();
 
@@ -103,14 +124,12 @@ impl RuneUpdater<'_, '_, '_> {
                   );
                 }
               } else {
-                // if amount is non-zero, distribute amount to eligible outputs
                 for output in destinations {
                   allocate(balance, amount.min(*balance), output);
                 }
               }
             }
           } else {
-            // Get the allocatable amount
             let amount = if amount == 0 {
               *balance
             } else {
@@ -141,8 +160,6 @@ impl RuneUpdater<'_, '_, '_> {
         })
         .unwrap_or_default();
 
-      // assign all un-allocated runes to the default output, or the first non
-      // OP_RETURN output if there is no default
       if let Some(vout) = pointer
         .map(|pointer| pointer.into_usize())
         .inspect(|&pointer| assert!(pointer < allocated.len()))
@@ -168,14 +185,12 @@ impl RuneUpdater<'_, '_, '_> {
       }
     }
 
-    // update outpoint balances
     let mut buffer: Vec<u8> = Vec::new();
     for (vout, balances) in allocated.into_iter().enumerate() {
       if balances.is_empty() {
         continue;
       }
 
-      // increment burned balances
       if tx.output[vout].script_pubkey.is_op_return() {
         for (id, balance) in &balances {
           *burned.entry(*id).or_default() += *balance;
@@ -187,7 +202,6 @@ impl RuneUpdater<'_, '_, '_> {
 
       let mut balances = balances.into_iter().collect::<Vec<(RuneId, Lot)>>();
 
-      // Sort balances by id so tests can assert balances in a fixed order
       balances.sort();
 
       let outpoint = OutPoint {
@@ -207,6 +221,26 @@ impl RuneUpdater<'_, '_, '_> {
             amount: balance.0,
           })?;
         }
+
+        if let Some(rune_activity) = &mut self.rune_activity {
+          rune_activity.insert(
+            (id.store(), self.height, tx_index),
+            RuneActivityEntry {
+              block_height: self.height,
+              tx_index,
+              operation: RuneOperation::Transfer,
+              amount: balance.0,
+              address: None,
+              txid,
+              timestamp: self.block_time.into(),
+            }
+            .store(),
+          )?;
+        }
+
+        if let Some(rune_id_to_outpoint) = &mut self.rune_id_to_outpoint {
+          rune_id_to_outpoint.insert(id.store(), (outpoint.store(), balance.0))?;
+        }
       }
 
       self
@@ -214,7 +248,6 @@ impl RuneUpdater<'_, '_, '_> {
         .insert(&outpoint.store(), buffer.as_slice())?;
     }
 
-    // increment entries with burned runes
     for (id, amount) in burned {
       *self.burned.entry(id).or_default() += amount;
 
@@ -225,6 +258,22 @@ impl RuneUpdater<'_, '_, '_> {
           rune_id: id,
           amount: amount.n(),
         })?;
+      }
+
+      if let Some(rune_activity) = &mut self.rune_activity {
+        rune_activity.insert(
+          (id.store(), self.height, tx_index),
+          RuneActivityEntry {
+            block_height: self.height,
+            tx_index,
+            operation: RuneOperation::Burn,
+            amount: amount.n(),
+            address: None,
+            txid,
+            timestamp: self.block_time.into(),
+          }
+          .store(),
+        )?;
       }
     }
 
@@ -314,6 +363,22 @@ impl RuneUpdater<'_, '_, '_> {
         txid,
         rune_id: id,
       })?;
+    }
+
+    if let Some(rune_activity) = &mut self.rune_activity {
+      rune_activity.insert(
+        (id.store(), self.height, 0),
+        RuneActivityEntry {
+          block_height: self.height,
+          tx_index: 0,
+          operation: RuneOperation::Etch,
+          amount: 0,
+          address: None,
+          txid,
+          timestamp: self.block_time.into(),
+        }
+        .store(),
+      )?;
     }
 
     let inscription_id = InscriptionId { txid, index: 0 };
@@ -482,6 +547,10 @@ impl RuneUpdater<'_, '_, '_> {
           let ((id, balance), len) = Index::decode_rune_balance(&buffer[i..]).unwrap();
           i += len;
           *unallocated.entry(id).or_default() += balance;
+
+          if let Some(rune_id_to_outpoint) = &mut self.rune_id_to_outpoint {
+            rune_id_to_outpoint.remove(id.store(), (input.previous_output.store(), balance))?;
+          }
         }
       }
     }

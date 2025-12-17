@@ -23,6 +23,7 @@ pub struct Settings {
   index_runes: bool,
   index_sats: bool,
   index_transactions: bool,
+  index_history: bool,
   integration_test: bool,
   max_savepoints: Option<usize>,
   no_index_inscriptions: bool,
@@ -138,6 +139,7 @@ impl Settings {
       index_runes: self.index_runes || source.index_runes,
       index_sats: self.index_sats || source.index_sats,
       index_transactions: self.index_transactions || source.index_transactions,
+      index_history: self.index_history || source.index_history,
       integration_test: self.integration_test || source.integration_test,
       max_savepoints: self.max_savepoints.or(source.max_savepoints),
       no_index_inscriptions: self.no_index_inscriptions || source.no_index_inscriptions,
@@ -176,6 +178,7 @@ impl Settings {
       index_runes: options.index_runes,
       index_sats: options.index_sats,
       index_transactions: options.index_transactions,
+      index_history: options.index_history,
       integration_test: options.integration_test,
       max_savepoints: options.max_savepoints,
       no_index_inscriptions: options.no_index_inscriptions,
@@ -266,6 +269,7 @@ impl Settings {
       index_runes: get_bool("INDEX_RUNES"),
       index_sats: get_bool("INDEX_SATS"),
       index_transactions: get_bool("INDEX_TRANSACTIONS"),
+      index_history: get_bool("INDEX_HISTORY"),
       integration_test: get_bool("INTEGRATION_TEST"),
       max_savepoints: get_usize("MAX_SAVEPOINTS")?,
       no_index_inscriptions: get_bool("NO_INDEX_INSCRIPTIONS"),
@@ -298,6 +302,7 @@ impl Settings {
       index_runes: true,
       index_sats: true,
       index_transactions: false,
+      index_history: false,
       integration_test: false,
       max_savepoints: None,
       no_index_inscriptions: false,
@@ -374,6 +379,7 @@ impl Settings {
       index_runes: self.index_runes,
       index_sats: self.index_sats,
       index_transactions: self.index_transactions,
+      index_history: self.index_history,
       integration_test: self.integration_test,
       max_savepoints: Some(self.max_savepoints.unwrap_or(2)),
       no_index_inscriptions: self.no_index_inscriptions,
@@ -554,6 +560,10 @@ impl Settings {
 
   pub fn index_inscriptions_raw(&self) -> bool {
     !self.no_index_inscriptions
+  }
+
+  pub fn index_history_raw(&self) -> bool {
+    self.index_history
   }
 
   pub fn index_runes_raw(&self) -> bool {
@@ -1130,6 +1140,7 @@ mod tests {
         index_runes: true,
         index_sats: true,
         index_transactions: true,
+        index_history: false,
         integration_test: true,
         no_index_inscriptions: true,
         server_password: Some("server password".into()),
@@ -1195,6 +1206,7 @@ mod tests {
         index_runes: true,
         index_sats: true,
         index_transactions: true,
+        index_history: false,
         integration_test: true,
         no_index_inscriptions: true,
         server_password: Some("server password".into()),

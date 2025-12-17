@@ -1,4 +1,7 @@
-use super::*;
+use {
+  super::*,
+  crate::index::{TransferEntryValue, entry::TransferEntry},
+};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 enum Curse {
@@ -54,6 +57,8 @@ pub(super) struct InscriptionUpdater<'a, 'tx> {
   pub(super) sat_to_sequence_number: &'a mut MultimapTable<'tx, u64, u32>,
   pub(super) sequence_number_to_children: &'a mut MultimapTable<'tx, u32, u32>,
   pub(super) sequence_number_to_entry: &'a mut Table<'tx, u32, InscriptionEntryValue>,
+  pub(super) inscription_transfers:
+    Option<&'a mut MultimapTable<'tx, InscriptionIdValue, TransferEntryValue>>,
   pub(super) timestamp: u32,
   pub(super) unbound_inscriptions: u64,
 }
@@ -406,6 +411,19 @@ impl InscriptionUpdater<'_, '_> {
             old_location: old_satpoint,
             sequence_number,
           })?;
+        }
+
+        if let Some(inscription_transfers) = &mut self.inscription_transfers {
+          inscription_transfers.insert(
+            inscription_id.store(),
+            TransferEntry {
+              block: self.height,
+              txid: new_satpoint.outpoint.txid,
+              old_satpoint,
+              new_satpoint,
+            }
+            .store(),
+          )?;
         }
 
         (false, sequence_number)

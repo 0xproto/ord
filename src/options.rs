@@ -60,8 +60,11 @@ pub struct Options {
   pub(crate) index_runes: bool,
   #[arg(long, help = "Track location of all satoshis.")]
   pub(crate) index_sats: bool,
-  #[arg(long, help = "Store transactions in index.")]
+  #[arg(long, help = "Track location of transactions.")]
   pub(crate) index_transactions: bool,
+  #[arg(long, help = "Track rune activity and inscription transfers history.")]
+  pub(crate) index_history: bool,
+
   #[arg(long, help = "Run in integration test mode.")]
   pub(crate) integration_test: bool,
   #[clap(long, short, long, help = "Specify output format. [default: json]")]
